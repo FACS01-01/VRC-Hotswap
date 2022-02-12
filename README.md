@@ -1,4 +1,8 @@
-# VRC-Hotswap
+# VRC Hotswap
+[![](https://img.shields.io/github/downloads/FACS01-01/VRC-Hotswap/total.svg)](https://github.com/FACS01-01/VRC-Hotswap/releases)
+[![](https://img.shields.io/github/v/release/FACS01-01/VRC-Hotswap)](https://github.com/FACS01-01/VRC-Hotswap/releases/latest)
+[![](https://img.shields.io/github/downloads/FACS01-01/VRC-Hotswap/latest/total.svg)](https://github.com/FACS01-01/VRC-Hotswap/releases/latest)
+
 Script for performing a Hotswap when uploading avatars to VRChat
 
 ## How to use
