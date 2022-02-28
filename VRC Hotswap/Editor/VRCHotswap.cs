@@ -1,4 +1,4 @@
-﻿#if UNITY_EDITOR
+#if UNITY_EDITOR
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -63,7 +63,7 @@ public class VRCHotswap
             Debug.Log("Selected file for Hotwap:\n" + vrcapath);
 
             abro = AssetBundle.RecompressAssetBundleAsync(vrcapath, Temp + "/uncomp.vrca", BuildCompression.Uncompressed);
-            EditorUtility.DisplayProgressBar("Hotswap - Decompressing VRCA", "Decompressing selected Avatar", 0.0f);
+            EditorUtility.DisplayProgressBar("Hotswap - Decompressing VRCA", "Decompressing Selected Avatar", 0.0f);
             EditorApplication.update += abroProgress;
             abro.completed += (AsyncOperation ao) =>
             {
@@ -87,7 +87,7 @@ public class VRCHotswap
 
     public static void abroProgress()
     {
-        EditorUtility.DisplayProgressBar("Hotswap - Decompressing VRCA", "Decompressing selected Avatar", abro.progress);
+        EditorUtility.DisplayProgressBar("Hotswap - Decompressing VRCA", "Decompressing Selected Avatar", abro.progress);
     }
 
     public static void HS2()
@@ -116,8 +116,7 @@ public class VRCHotswap
         EditorUtility.DisplayProgressBar("Hotswap - Analazing VRCA", "Loading Dummy and Selected Avatar", 0.0f);
 
         string dummy = File.ReadAllText(Temp + "/uncompD.vrca");
-        byte[] avib = File.ReadAllBytes(Temp + "/uncomp.vrca");
-        string avi = System.Text.Encoding.UTF8.GetString(avib);
+        string avi = File.ReadAllText(Temp + "/uncomp.vrca");
 
         EditorUtility.DisplayProgressBar("Hotswap - Analazing VRCA", "Looking for Avatar IDs and CABs", 0.2f);
         Match m = AvatarIDrgx.Match(dummy);
@@ -163,34 +162,48 @@ public class VRCHotswap
         var OldCABmatches = Regex.Matches(avi, OldCAB);
         int OldCABn = OldCABmatches.Count;
 
+        avi = null;
+        EditorUtility.DisplayProgressBar("Hotswap - Analazing VRCA", "Loading Selected Avatar", 0.99f);
+        byte[] avib = File.ReadAllBytes(Temp + "/uncomp.vrca");
         EditorUtility.ClearProgressBar();
-
+        
         byte[] bytes = newbytes(avib, System.Text.Encoding.UTF8.GetBytes(OldCAB), System.Text.Encoding.UTF8.GetBytes(NewCAB),
             System.Text.Encoding.UTF8.GetBytes(OldAvatarID), System.Text.Encoding.UTF8.GetBytes(NewAvatarID), OldCABn, OldIDn);
         File.WriteAllBytes(Temp + "/uncomp2.vrca", bytes);
         //File.Delete(Temp + "/custom.vrca");
         EditorUtility.ClearProgressBar();
+        bytes = null;
 
-        EditorUtility.DisplayProgressBar("Hotswap - Compressing VRCA", "Compressing selected Avatar", 0.0f);
+        EditorUtility.DisplayProgressBar("Hotswap - Compressing VRCA", "Compressing Selected Avatar", 0.0f);
         compress();
     }
     public static void compress()
     {
         ProcessStartInfo startInfo = new ProcessStartInfo();
-        startInfo.FileName = Application.dataPath+ "/VRC Hotswap/Resources/Compressor/HOTSWAP.exe";
-        startInfo.Arguments = " c \"" + Temp + "/uncomp2.vrca\" \"" + Temp + "/custom2.vrca\"";
-        startInfo.RedirectStandardOutput = true;
-        startInfo.RedirectStandardError = true;
+        startInfo.FileName = Application.dataPath + "/VRC Hotswap/Resources/VRC Hotswap Compressor.exe";
+        startInfo.Arguments = " c \"" + Temp + "/uncomp2.vrca\" \"" + Temp + "/custom2.vrca\" no-console";
         startInfo.UseShellExecute = false;
+        startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+        startInfo.RedirectStandardOutput = true;
         startInfo.CreateNoWindow = true;
 
-        Process processTempp = new Process();
-        processTempp.StartInfo = startInfo;
-        processTempp.EnableRaisingEvents = true;
-        processTempp.Exited += new EventHandler((object s, System.EventArgs e) => { syncContext.Post(_ => { HS4(); }, null); });
+        Process process = new Process();
+        process.StartInfo = startInfo;
+        process.EnableRaisingEvents = true;
+        process.OutputDataReceived += new DataReceivedEventHandler((sender, e) =>
+        {
+            string data = e.Data;
+            if (!String.IsNullOrEmpty(data) && float.TryParse(data, out float flo))
+            {
+                flo /= 100;
+                syncContext.Post(_ => { EditorUtility.DisplayProgressBar("Hotswap - Compressing VRCA", "Compressing Selected Avatar", flo); }, null);
+            }
+        });
+        process.Exited += new EventHandler((object s, System.EventArgs e) => { syncContext.Post(_ => { HS4(); }, null); });
         try
         {
-            processTempp.Start();
+            process.Start();
+            process.BeginOutputReadLine();
         }
         catch (Exception e)
         {
@@ -219,18 +232,18 @@ public class VRCHotswap
     }
     public static byte[] newbytes(byte[] input, byte[] oldCAB, byte[] newCAB, byte[] oldID, byte[] newID, int nCAB, int nID)
     {   // mmmh yeah my brain hurts
-        int inputL = input.Length;
-        int newCABL = newCAB.Length;
-        int newIDL = newID.Length;
+        ulong inputL = (ulong)input.Length;
+        ulong newCABL = (ulong)newCAB.Length;
+        ulong newIDL = (ulong)newID.Length;
         int oldCABL = oldCAB.Length;
         int oldIDL = oldID.Length;
-        int deltaCAB = newCABL - oldCABL;
-        int deltaID = newIDL - oldIDL;
-        int N = input.Length + nCAB * deltaCAB + nID * deltaID;
+        int deltaCAB = (int)newCABL - oldCABL;
+        int deltaID = (int)newIDL - oldIDL;
+        ulong N = inputL + (ulong)(nCAB * deltaCAB + nID * deltaID);
         byte[] output = new byte[N];
 
-        int index = 0;
-        int indexold = 0;
+        ulong index = 0;
+        ulong indexold = 0;
         int CABhit = 0;
         int IDhit = 0;
 
@@ -257,8 +270,8 @@ public class VRCHotswap
                     CABhit++;
                     if (CABhit == oldCABL)
                     {
-                        index = index + deltaCAB;
-                        for (int j = 0; j < newCABL; j++)
+                        index = index + (ulong)deltaCAB;
+                        for (ulong j = 0; j < newCABL; j++)
                         {
                             output[index - j] = newCAB[newCABL - 1 - j];
                         }
@@ -276,8 +289,8 @@ public class VRCHotswap
                     IDhit++;
                     if (IDhit == oldIDL)
                     {
-                        index = index + deltaID;
-                        for (int j = 0; j < newIDL; j++)
+                        index = index + (ulong)deltaID;
+                        for (ulong j = 0; j < newIDL; j++)
                         {
                             output[index - j] = newID[newIDL - 1 - j];
                         }
@@ -317,5 +330,4 @@ public class VRCHotswap
         }
     }
 }
-
 #endif
