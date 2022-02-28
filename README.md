@@ -6,7 +6,7 @@
 Script for performing a Hotswap when uploading avatars to VRChat
 
 ## How to use
-0. Install the required Unity version and create a Unity project with the latest VRChat SDK.
+0. Install the required Unity version (+Android Build Support) and create a Unity project with the latest VRChat SDK.
 1. Import the VRC Hotswap Unity Package.
 2. Create a dummy avatar with the Menu button "VRC Hotswap/Spawn Dummy Avi".
 3. If you want to overwrite an existing avatar, or upload a Quest version to your already uploaded PC avatar, attach the corresponding Avatar ID into the Dummy Avi's Pipeline Manager component.
