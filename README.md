@@ -17,5 +17,5 @@ Script for performing a Hotswap when uploading avatars to VRChat
 8. Wait until the Console in Unity says "HOTSWAP SUCCESSFUL".
 9. You can finish the uploading process hitting the "Upload" button.
 
-## Thanks to
-[A.R.E.S](https://github.com/cassell1337/A.R.E.S) for the files "HOTSWAP.exe" and "AssetsTools.NET.dll", used for fast recompression.
+## Thanks to / Using
+My fork of [AssetsTools.NET](https://github.com/FACS01-01/AssetsTools.NET), embedded into "VRC Hotswap Compressor.exe", used for recompression with progress bar.
