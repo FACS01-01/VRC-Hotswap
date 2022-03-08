@@ -1,7 +1,10 @@
 #if UNITY_EDITOR
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Net;
 using System.Text.RegularExpressions;
 using System.Threading;
 using UnityEditor;
@@ -11,7 +14,9 @@ using Debug = UnityEngine.Debug;
 public class VRCHotswap
 {
     public static SynchronizationContext syncContext = SynchronizationContext.Current;
-    private static string Temp = Application.temporaryCachePath;
+    private static readonly string ProjTempPath = Application.temporaryCachePath;
+    private static readonly string SysTempPath = Path.GetTempPath().Replace(@"\",@"/");
+    private static readonly string ProjAssetsPath = Application.dataPath;
     private static AssetBundleRecompressOperation abro;
 
     [MenuItem("VRC Hotswap/Hotswap", true)]
@@ -19,9 +24,9 @@ public class VRCHotswap
     {
         if (!Application.isPlaying)
         {
-            if (File.Exists(Temp + "/custom.vrca"))
+            if (File.Exists(ProjTempPath + "/custom.vrca"))
             {
-                File.Delete(Temp + "/custom.vrca");
+                File.Delete(ProjTempPath + "/custom.vrca");
             }
             return false;
         }
@@ -33,7 +38,7 @@ public class VRCHotswap
             {
                 if (script.GetType().Name == "RuntimeBlueprintCreation")
                 {
-                    if (File.Exists(Temp + "/custom.vrca"))
+                    if (File.Exists(ProjTempPath + "/custom.vrca"))
                     {
                         return true;
                     }
@@ -46,10 +51,10 @@ public class VRCHotswap
     [MenuItem("VRC Hotswap/Hotswap")]
     public static void Hotswap()
     {
-        if (File.Exists(Temp + "/uncomp.vrca")) File.Delete(Temp + "/uncomp.vrca");
-        if (File.Exists(Temp + "/uncomp2.vrca")) File.Delete(Temp + "/uncomp2.vrca");
-        if (File.Exists(Temp + "/uncompD.vrca")) File.Delete(Temp + "/uncompD.vrca");
-        if (File.Exists(Temp + "/custom2.vrca")) File.Delete(Temp + "/custom2.vrca");
+        if (File.Exists(ProjTempPath + "/uncomp.vrca")) File.Delete(ProjTempPath + "/uncomp.vrca");
+        if (File.Exists(ProjTempPath + "/uncomp2.vrca")) File.Delete(ProjTempPath + "/uncomp2.vrca");
+        if (File.Exists(ProjTempPath + "/uncompD.vrca")) File.Delete(ProjTempPath + "/uncompD.vrca");
+        if (File.Exists(ProjTempPath + "/custom2.vrca")) File.Delete(ProjTempPath + "/custom2.vrca");
 
         if (EditorUtility.DisplayDialog("Hotswap", "Please select the avatar file you want to hotswap", "Continue", "Cancel"))
         {
@@ -57,12 +62,12 @@ public class VRCHotswap
 
             if (string.IsNullOrEmpty(vrcapath))
             {
-                Debug.LogWarning("Hotwap cancelled.");
+                Debug.LogWarning("Hotwap cancelled.\n");
                 return;
             }
-            Debug.Log("Selected file for Hotwap:\n" + vrcapath);
+            Debug.Log("Selected file for Hotwap:\n" + vrcapath + "\n");
 
-            abro = AssetBundle.RecompressAssetBundleAsync(vrcapath, Temp + "/uncomp.vrca", BuildCompression.Uncompressed);
+            abro = AssetBundle.RecompressAssetBundleAsync(vrcapath, ProjTempPath + "/uncomp.vrca", BuildCompression.Uncompressed);
             EditorUtility.DisplayProgressBar("Hotswap - Decompressing VRCA", "Decompressing Selected Avatar", 0.0f);
             EditorApplication.update += abroProgress;
             abro.completed += (AsyncOperation ao) =>
@@ -75,14 +80,150 @@ public class VRCHotswap
                 }
                 else
                 {
-                    Debug.LogError("Failed to decompress the selected VRCA file.\n" + abro.result);
+                    Debug.LogError("Failed to decompress the selected VRCA file.\n" + abro.result + "\n");
                 }
             };
         }
         else
         {
-            Debug.LogWarning("Hotwap cancelled.");
+            Debug.LogWarning("Hotwap cancelled.\n");
         }
+    }
+
+    [MenuItem("VRC Hotswap/Get Latest VRC SDK")]
+    public static void GetLatestSDK()
+    {
+        string vrcSDKs = "";
+        try
+        {
+            using (WebClient wc = new WebClient())
+            {
+                wc.Headers.Add("User-Agent: Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)");
+                vrcSDKs = wc.DownloadString(new Uri("https://api.vrchat.cloud/api/1/config"));
+            }
+        }
+        catch (WebException e)
+        {
+            ErrorMessage("An error occurred while fetching latest VRC SDK3. VRChat API down?", e);
+            return;
+        }
+        catch (NotSupportedException e)
+        {
+            ErrorMessage("Unexpected error occurred while fetching latest VRC SDK3.", e);
+            return;
+        }
+
+        string pattern = @"https:\/\/files\.vrchat\.cloud\/sdk\/VRCSDK3-AVATAR-(([0-9]+\.*)+)_Public.unitypackage";
+        Regex rg = new Regex(pattern);
+        MatchCollection matchedSDKURL = rg.Matches(vrcSDKs);
+        if (!(matchedSDKURL.Count == 1))
+        {
+            ErrorMessage("Couldn't parse latest VRC SDK3 version.");
+            return;
+        }
+        string SDK3URL = matchedSDKURL[0].Value;
+        string SDK3Ver = matchedSDKURL[0].Groups[1].Value;
+
+        if (File.Exists(ProjAssetsPath + "/VRCSDK/version.txt"))
+        {
+            string installedversion = File.ReadLines(ProjAssetsPath + "/VRCSDK/version.txt").First().Trim();
+            int canupdate = CanUpdate(installedversion, SDK3Ver);
+            if (canupdate == 0)
+            {
+                Debug.Log($"<color=cyan>VRC SDK is up to date! Current is {installedversion}</color>\n"); return;
+            }
+            else if (canupdate == -1)
+            {
+                Debug.LogWarning($"Installed VRC SDK is ahead of Public release? Latest is {SDK3Ver}, installed is {installedversion}\n"); return;
+            }
+        }
+
+        string SDK3Filepath = SysTempPath + "SDK3Avatars_" + SDK3Ver + ".unitypackage";
+        if (!File.Exists(SDK3Filepath))
+        {
+            try
+            {
+                using (WebClient wc = new WebClient())
+                {
+                    wc.Headers.Add("User-Agent: Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)");
+                    wc.DownloadFile(new Uri(SDK3URL), SDK3Filepath);
+                }
+            }
+            catch (WebException e)
+            {
+                ErrorMessage($"An error occurred while downloading latest VRC SDK3 (v{SDK3Ver}). Internet down?", e);
+                return;
+            }
+            catch (NotSupportedException e)
+            {
+                ErrorMessage($"Unexpected error occurred while downloading latest VRC SDK3 (v{SDK3Ver}).", e);
+                return;
+            }
+        }
+
+        AssetDatabase.ImportPackage(SDK3Filepath, true);
+    }
+
+    [MenuItem("VRC Hotswap/Get Custom Preview Images", true)]
+    static bool Validate_HasVRCSDK()
+    {
+#if VRC_SDK_VRCSDK3
+        if (File.Exists(ProjAssetsPath + "/VRCSDK/Plugins/VRCSDK3A.dll"))
+        {
+            return true;
+        }
+#endif
+        return false;
+    }
+
+    [MenuItem("VRC Hotswap/Get Custom Preview Images")]
+    public static void GetCustomPreviewImages()
+    {
+        string CustomPrevImagesFilepath = SysTempPath + "VRC Custom Preview Images.unitypackage";
+        try
+        {
+            using (WebClient wc = new WebClient())
+            {
+                wc.Headers.Add("User-Agent: Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)");
+                wc.DownloadFile(new Uri("https://github.com/FACS01-01/FACS_Utilities/raw/main/Plugins/VRC%20Custom%20Preview%20Images.unitypackage"), CustomPrevImagesFilepath+"2");
+            }
+        }
+        catch (WebException e)
+        {
+            ErrorMessage($"An error occurred while downloading FACS Custom Preview Images. GitHub API down?", e); return;
+        }
+        catch (NotSupportedException e)
+        {
+            ErrorMessage($"Unexpected error occurred while downloading FACS Custom Preview Images.", e); return;
+        }
+        if (File.Exists(CustomPrevImagesFilepath)) File.Delete(CustomPrevImagesFilepath);
+        File.Move(CustomPrevImagesFilepath + "2", CustomPrevImagesFilepath);
+        AssetDatabase.ImportPackage(CustomPrevImagesFilepath, true);
+    }
+
+    private static int CanUpdate(string installedSDK, string fetchedSDK)
+    {
+        int[] installedSDK_ = Array.ConvertAll(installedSDK.Split('.'), int.Parse);
+        int[] fetchedSDK_ = Array.ConvertAll(fetchedSDK.Split('.'), int.Parse);
+        int compareLength = Mathf.Min(installedSDK_.Length, fetchedSDK_.Length);
+        for (int i = 0; i < compareLength; i++)
+        {
+            if (installedSDK_[i] > fetchedSDK_[i])
+            {
+                return -1;
+            }
+            else if (installedSDK_[i] < fetchedSDK_[i])
+            {
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    private static void ErrorMessage(string msg, Exception e = null)
+    {
+        if (e != null) Debug.LogError(e.Message + "\n\n");
+        else Debug.LogError(msg + "\n\n");
     }
 
     public static void abroProgress()
@@ -92,7 +233,7 @@ public class VRCHotswap
 
     public static void HS2()
     {
-        abro = AssetBundle.RecompressAssetBundleAsync(Temp + "/custom.vrca", Temp + "/uncompD.vrca", BuildCompression.Uncompressed);
+        abro = AssetBundle.RecompressAssetBundleAsync(ProjTempPath + "/custom.vrca", ProjTempPath + "/uncompD.vrca", BuildCompression.Uncompressed);
         abro.completed += (AsyncOperation ao) =>
         {
             if (abro.success)
@@ -101,7 +242,7 @@ public class VRCHotswap
             }
             else
             {
-                Debug.LogError("Failed to decompress the dummy VRCA file.\n" + abro.result);
+                Debug.LogError("Failed to decompress the dummy VRCA file.\n" + abro.result + "\n");
             }
         };
     }
@@ -115,14 +256,15 @@ public class VRCHotswap
 
         EditorUtility.DisplayProgressBar("Hotswap - Analazing VRCA", "Loading Dummy and Selected Avatar", 0.0f);
 
-        string dummy = File.ReadAllText(Temp + "/uncompD.vrca");
-        string avi = File.ReadAllText(Temp + "/uncomp.vrca");
+        string dummy = File.ReadAllText(ProjTempPath + "/uncompD.vrca");
+        string avi = File.ReadAllText(ProjTempPath + "/uncomp.vrca");
 
         EditorUtility.DisplayProgressBar("Hotswap - Analazing VRCA", "Looking for Avatar IDs and CABs", 0.2f);
+
         Match m = AvatarIDrgx.Match(dummy);
         if (!m.Success)
         {
-            Debug.LogError("Unable to find New Avatar ID in Dummy Avatar");
+            Debug.LogError("Unable to find New Avatar ID in Dummy Avatar.\n");
             EditorUtility.ClearProgressBar();
             return;
         }
@@ -132,7 +274,7 @@ public class VRCHotswap
         m = CABrgx.Match(dummy);
         if (!m.Success)
         {
-            Debug.LogError("Unable to find New CAB in Dummy Avatar");
+            Debug.LogError("Unable to find New CAB in Dummy Avatar.\n");
             EditorUtility.ClearProgressBar();
             return;
         }
@@ -142,7 +284,7 @@ public class VRCHotswap
         m = AvatarIDrgx.Match(avi);
         if (!m.Success)
         {
-            Debug.LogError("Unable to find Old Avatar ID in selected Avatar");
+            Debug.LogError("Unable to find Old Avatar ID in selected Avatar.\n");
             EditorUtility.ClearProgressBar();
             return;
         }
@@ -154,7 +296,7 @@ public class VRCHotswap
         m = CABrgx.Match(avi);
         if (!m.Success)
         {
-            Debug.LogError("Unable to find Old CAB in selected Avatar");
+            Debug.LogError("Unable to find Old CAB in selected Avatar.\n");
             EditorUtility.ClearProgressBar();
             return;
         }
@@ -162,17 +304,46 @@ public class VRCHotswap
         var OldCABmatches = Regex.Matches(avi, OldCAB);
         int OldCABn = OldCABmatches.Count;
 
-        avi = null;
+        string GoodUnityVer = Application.unityVersion;
+        List<string> wrongunityvers = new List<string>();
+        List<int> wrongunityversN = new List<int>();
+        string UnityVerFind = @"20[\d]{2}\.[\d]\.[\d]{2}f[\d]";
+        MatchCollection UnityVerrgx = Regex.Matches(avi, UnityVerFind);
+        foreach (Match match in UnityVerrgx)
+        {
+            string matched = match.Groups[0].Value;
+            if (matched == GoodUnityVer) { continue; }
+            if (wrongunityvers.Contains(matched))
+            {
+                int ind = wrongunityvers.IndexOf(matched);
+                wrongunityversN[ind]++;
+            }
+            else
+            {
+                wrongunityvers.Add(matched);
+                wrongunityversN.Add(1);
+            }
+        }
+
+        avi = null; System.GC.Collect();
         EditorUtility.DisplayProgressBar("Hotswap - Analazing VRCA", "Loading Selected Avatar", 0.99f);
-        byte[] avib = File.ReadAllBytes(Temp + "/uncomp.vrca");
+        byte[] avib = File.ReadAllBytes(ProjTempPath + "/uncomp.vrca");
         EditorUtility.ClearProgressBar();
-        
-        byte[] bytes = newbytes(avib, System.Text.Encoding.UTF8.GetBytes(OldCAB), System.Text.Encoding.UTF8.GetBytes(NewCAB),
-            System.Text.Encoding.UTF8.GetBytes(OldAvatarID), System.Text.Encoding.UTF8.GetBytes(NewAvatarID), OldCABn, OldIDn);
-        File.WriteAllBytes(Temp + "/uncomp2.vrca", bytes);
-        //File.Delete(Temp + "/custom.vrca");
+
+        var changes = new List<(string, string, int)>();
+        changes.Add((OldCAB, NewCAB, OldCABn)); changes.Add((OldAvatarID, NewAvatarID, OldIDn));
+        if (wrongunityvers.Any())
+        {
+            for (int i = 0; i < wrongunityvers.Count; i++)
+            {
+                changes.Add((wrongunityvers[i], GoodUnityVer, wrongunityversN[i]));
+            }
+        }
+        byte[] bytes = ComputeNewBytes(avib, changes);
+
+        File.WriteAllBytes(ProjTempPath + "/uncomp2.vrca", bytes);
         EditorUtility.ClearProgressBar();
-        bytes = null;
+        bytes = null; System.GC.Collect();
 
         EditorUtility.DisplayProgressBar("Hotswap - Compressing VRCA", "Compressing Selected Avatar", 0.0f);
         compress();
@@ -181,7 +352,7 @@ public class VRCHotswap
     {
         ProcessStartInfo startInfo = new ProcessStartInfo();
         startInfo.FileName = Application.dataPath + "/VRC Hotswap/Resources/VRC Hotswap Compressor.exe";
-        startInfo.Arguments = " c \"" + Temp + "/uncomp2.vrca\" \"" + Temp + "/custom2.vrca\" no-console";
+        startInfo.Arguments = " c \"" + ProjTempPath + "/uncomp2.vrca\" \"" + ProjTempPath + "/custom2.vrca\" no-console";
         startInfo.UseShellExecute = false;
         startInfo.WindowStyle = ProcessWindowStyle.Hidden;
         startInfo.RedirectStandardOutput = true;
@@ -207,7 +378,7 @@ public class VRCHotswap
         }
         catch (Exception e)
         {
-            Debug.LogError(e);
+            Debug.LogError(e.Message + "\n");
             throw;
         }
     }
@@ -215,97 +386,98 @@ public class VRCHotswap
     {
         EditorUtility.ClearProgressBar();
 
-        if (File.Exists(Temp + "/uncomp.vrca")) File.Delete(Temp + "/uncomp.vrca");
-        if (File.Exists(Temp + "/uncomp2.vrca")) File.Delete(Temp + "/uncomp2.vrca");
-        if (File.Exists(Temp + "/uncompD.vrca")) File.Delete(Temp + "/uncompD.vrca");
+        if (File.Exists(ProjTempPath + "/uncomp.vrca")) File.Delete(ProjTempPath + "/uncomp.vrca");
+        if (File.Exists(ProjTempPath + "/uncomp2.vrca")) File.Delete(ProjTempPath + "/uncomp2.vrca");
+        if (File.Exists(ProjTempPath + "/uncompD.vrca")) File.Delete(ProjTempPath + "/uncompD.vrca");
 
-        if (File.Exists(Temp + "/custom2.vrca"))
+        if (File.Exists(ProjTempPath + "/custom2.vrca"))
         {
-            if (File.Exists(Temp + "/custom.vrca")) File.Delete(Temp + "/custom.vrca");
-            File.Move(Temp + "/custom2.vrca", Temp + "/custom.vrca");
-            Debug.Log($"<color=cyan>HOTSWAP SUCCESSFUL</color>");
+            if (File.Exists(ProjTempPath + "/custom.vrca")) File.Delete(ProjTempPath + "/custom.vrca");
+            File.Move(ProjTempPath + "/custom2.vrca", ProjTempPath + "/custom.vrca");
+            Debug.Log($"<color=cyan>HOTSWAP SUCCESSFUL</color>\n");
         }
         else
         {
             Debug.LogError($"Hotswap failed\n");
         }
+        System.GC.Collect();
     }
-    public static byte[] newbytes(byte[] input, byte[] oldCAB, byte[] newCAB, byte[] oldID, byte[] newID, int nCAB, int nID)
+    public static byte[] ComputeNewBytes(byte[] input, List<(string, string, int)> StringsToReplace)
     {   // mmmh yeah my brain hurts
+        int StringsToReplaceCount = StringsToReplace.Count;
+
+        byte[][] OldStrings = new byte[StringsToReplaceCount][];
+        byte[][] NewStrings = new byte[StringsToReplaceCount][];
+        int[] OldStringsCount = new int[StringsToReplaceCount];
+        int[] OldStringsLength = new int[StringsToReplaceCount];
+        ulong[] NewStringsLength = new ulong[StringsToReplaceCount];
+        int[] StringsDeltaLenght = new int[StringsToReplaceCount];
+
         ulong inputL = (ulong)input.Length;
-        ulong newCABL = (ulong)newCAB.Length;
-        ulong newIDL = (ulong)newID.Length;
-        int oldCABL = oldCAB.Length;
-        int oldIDL = oldID.Length;
-        int deltaCAB = (int)newCABL - oldCABL;
-        int deltaID = (int)newIDL - oldIDL;
-        ulong N = inputL + (ulong)(nCAB * deltaCAB + nID * deltaID);
+        ulong N = inputL;
+
+        for (int i = 0; i < StringsToReplaceCount; i++)
+        {
+            var oldstr = System.Text.Encoding.UTF8.GetBytes(StringsToReplace[i].Item1);
+            OldStrings[i] = oldstr;
+            OldStringsLength[i] = oldstr.Length;
+            int reps = StringsToReplace[i].Item3;
+            OldStringsCount[i] = reps;
+            var newstr = System.Text.Encoding.UTF8.GetBytes(StringsToReplace[i].Item2);
+            NewStrings[i] = newstr;
+            NewStringsLength[i] = (ulong)newstr.Length;
+            int delta = newstr.Length - oldstr.Length;
+            StringsDeltaLenght[i] = delta;
+            N += (ulong)(delta * reps);
+        }
+
         byte[] output = new byte[N];
 
-        ulong index = 0;
-        ulong indexold = 0;
-        int CABhit = 0;
-        int IDhit = 0;
+        int[] OldStringsHits = new int[StringsToReplaceCount];
 
-        float progress = 0.05f;
+        float progress = 0.025f;
         EditorUtility.DisplayProgressBar("Hotswap - Generating new VRCA", "Combining data into your new Avatar", progress);
-        
-        while (indexold < inputL)
+
+        for ((ulong input_index, ulong output_index) = (0, 0); input_index < inputL; input_index++, output_index++)
         {
-            float prog = (float)indexold / inputL;
-            if (prog > progress + 0.1f)
+            float prog = (float)input_index / inputL;
+            if (prog > progress + 0.05f)
             {
                 progress = prog;
                 EditorUtility.DisplayProgressBar("Hotswap - Generating new VRCA", "Combining data into your new Avatar", progress);
             }
-            
-            if (index < N)
-            {
-                output[index] = input[indexold];
-            }
-            if (nCAB > 0)
-            {
-                if (input[indexold] == oldCAB[CABhit])
-                {
-                    CABhit++;
-                    if (CABhit == oldCABL)
-                    {
-                        index = index + (ulong)deltaCAB;
-                        for (ulong j = 0; j < newCABL; j++)
-                        {
-                            output[index - j] = newCAB[newCABL - 1 - j];
-                        }
-                        nCAB--; IDhit = CABhit = 0;
-                        index++; indexold++;
-                        continue;
-                    }
-                }
-                else CABhit = 0;
-            }
-            if (nID > 0)
-            {
-                if (input[indexold] == oldID[IDhit])
-                {
-                    IDhit++;
-                    if (IDhit == oldIDL)
-                    {
-                        index = index + (ulong)deltaID;
-                        for (ulong j = 0; j < newIDL; j++)
-                        {
-                            output[index - j] = newID[newIDL - 1 - j];
-                        }
-                        nID--; CABhit = IDhit = 0;
-                        index++; indexold++;
-                        continue;
-                    }
-                }
-                else IDhit = 0;
-            }
 
-            index++; indexold++;
+            if (output_index < N) output[output_index] = input[input_index];
+
+            for (int i = 0; i < StringsToReplaceCount; i++)
+            {
+                if (OldStringsCount[i] > 0)
+                {
+                    if (input[input_index] == OldStrings[i][OldStringsHits[i]])
+                    {
+                        OldStringsHits[i]++;
+                        if (OldStringsHits[i] == OldStringsLength[i])
+                        {
+                            output_index += NewStringsLength[i] - (ulong)OldStringsLength[i];
+                            ulong L = NewStringsLength[i];
+                            for (ulong j = 0; j < L; j++) output[output_index - j] = NewStrings[i][L - 1 - j];
+                            OldStringsCount[i]--;
+                            for (int j = 0; j < OldStringsHits.Length; j++) OldStringsHits[j] = 0;
+                            break;
+                        }
+                    }
+                    else OldStringsHits[i] = 0;
+                }
+            }
         }
 
         return output;
+    }
+
+    [MenuItem("VRC Hotswap/Spawn Dummy Avi", true)]
+    static bool ValidateSpawnDummy()
+    {
+        return Validate_HasVRCSDK();
     }
 
     [MenuItem("VRC Hotswap/Spawn Dummy Avi")]
@@ -316,8 +488,11 @@ public class VRCHotswap
         {
             DummyAvi = UnityEngine.Object.Instantiate(Resources.Load("Dummy Avi Prefab") as GameObject);
             DummyAvi.name = "Dummy Avi";
+            Debug.Log($"<color=cyan>Dummy Avatar Spawned Successfully!</color>\n");
         }
-        Debug.Log("Dummy Avatar Spawned Successfully!");
+        else Debug.Log($"<color=cyan>Dummy Avatar already in Scene!</color>\n");
+
+        Selection.activeGameObject = DummyAvi;
 
         Material mat = AssetDatabase.LoadAssetAtPath<Material>("Assets/VRC Hotswap/Resources/DummyMat.mat");
         if (mat.shader.name == "VRChat/Mobile/Toon Lit") return;
