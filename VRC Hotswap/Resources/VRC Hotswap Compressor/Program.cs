@@ -10,6 +10,7 @@ namespace FACS01_Bundle_Comp_Decomp
         public static bool noConsole = false;
         static void Main(string[] args)
         {
+            if (args.Length >= 4) { noConsole = args[3] == "no-console"; }
             if (!noConsole)
             {
                 Console.ForegroundColor = ConsoleColor.Cyan;
@@ -21,7 +22,6 @@ namespace FACS01_Bundle_Comp_Decomp
                 if (!noConsole) ErrorMSG("Usage: {method} {bundlePath} {savePath}\nmethod: c (compression) , d (decompression)");
                 return;
             }
-            if (args.Length >= 4) { noConsole = args[3] == "no-console"; }
             
             string bundlePath = args[1].Replace(@"/",@"\");
             if (!File.Exists(bundlePath))
@@ -41,7 +41,7 @@ namespace FACS01_Bundle_Comp_Decomp
             if (work == "d")
             {
                 if (!noConsole) Console.WriteLine("Decompression routine started!");
-                DecompressToFile(bundlePath, savePath);
+                DecompressFile(bundlePath, savePath);
             }
             else if (work == "c")
             {
@@ -55,36 +55,43 @@ namespace FACS01_Bundle_Comp_Decomp
             }
         }
 
-        public static void DecompressToFile(string bundlePath, string savePath)
+        public static void DecompressFile(string compressed_path, string decompressed_path_result)
         {
-            AssetsManager helper = new AssetsManager();
-            var inst = helper.LoadBundleFile(bundlePath);
-            var file = inst.file;
-            using (FileStream stream = File.Open(savePath, FileMode.Create, FileAccess.ReadWrite))
+            using (var input_stream = File.OpenRead(compressed_path))
             {
-                if (!noConsole) Console.ForegroundColor = ConsoleColor.Blue;
-                var progressBar = new SZProgress();
-                file.reader.Position = 0;
-                file.Unpack(file.reader, new AssetsFileWriter(stream), progressBar);
-                stream.Position = 0;
-            }
-            if (!noConsole)
-            {
-                Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine("File decompressed!");
+                var compressed_file = new AssetBundleFile();
+                compressed_file.Read(new AssetsFileReader(input_stream), true);
+                if (compressed_file.bundleHeader6 != null && compressed_file.bundleHeader6.GetCompressionType() != 0)
+                {
+                    using (FileStream output_stream = File.Open(decompressed_path_result, FileMode.Create, FileAccess.ReadWrite))
+                    {
+                        if (!noConsole) Console.ForegroundColor = ConsoleColor.Blue;
+                        var progressBar = new SZProgress();
+                        compressed_file.reader.Position = 0;
+                        compressed_file.Unpack(compressed_file.reader, new AssetsFileWriter(output_stream), progressBar);
+                        output_stream.Position = 0;
+                    }
+                    if (!noConsole)
+                    {
+                        Console.ForegroundColor = ConsoleColor.White;
+                        Console.WriteLine("File decompressed!");
+                    }
+                }
             }
         }
 
-        public static void CompressBundle(string file, string compFile)
+        public static void CompressBundle(string decompressed_path, string compressed_path_result)
         {
             var am = new AssetsManager();
-            var bun = am.LoadBundleFile(file);
-            using (var stream = File.OpenWrite(compFile))
-            using (var writer = new AssetsFileWriter(stream))
+            var bun = am.LoadBundleFile(decompressed_path);
+            using (var stream = File.OpenWrite(compressed_path_result))
             {
-                if (!noConsole) Console.ForegroundColor = ConsoleColor.Blue;
-                var progressBar = new SZProgress();
-                bun.file.Pack(bun.file.reader, writer, AssetBundleCompressionType.LZMA, progressBar);
+                using (var writer = new AssetsFileWriter(stream))
+                {
+                    if (!noConsole) Console.ForegroundColor = ConsoleColor.Blue;
+                    var progressBar = new SZProgress();
+                    bun.file.Pack(bun.file.reader, writer, AssetBundleCompressionType.LZMA, progressBar);
+                }
             }
         }
 
@@ -105,7 +112,7 @@ namespace FACS01_Bundle_Comp_Decomp
 
         public SZProgress()
         {
-            maxSize = 0;
+            maxSize = 1;
             prog = 0.0f;
         }
         public void SetProgress(ulong inSize)
