@@ -361,8 +361,9 @@ public class VRCHotswap
                     if (mc.Count > 0)
                     {
                         OldPrefab = mc[0].Value;
+                        OldPrefab = OldPrefab.Substring(0, OldPrefab.Length - 7);
                         string temp = OldPrefab.Replace("prefab-id-v1_", "");
-                        OldAvatarID = temp.Substring(0, temp.Length - 18);
+                        OldAvatarID = temp.Substring(0, temp.Length - 11);
                     }
                     if (!olderAviFlag)
                     {
@@ -414,8 +415,9 @@ public class VRCHotswap
             return;
         }
         string NewPrefab = m.Value;
+        NewPrefab = NewPrefab.Substring(0, NewPrefab.Length - 7);
         string tempaviid = NewPrefab.Replace("prefab-id-v1_", "");
-        string NewAvatarID = tempaviid.Substring(0, tempaviid.Length - 18);
+        string NewAvatarID = tempaviid.Substring(0, tempaviid.Length - 11);
 
         m = CABrgx.Match(dummy);
         if (!m.Success)
@@ -433,9 +435,9 @@ public class VRCHotswap
         var changes = new List<(string, string)>();
         if (olderAviFlag)
         {   //sad offset
-            //changes.Add(("_customavatar.prefab", NewPrefab));
-            //changes.Add(("customavatar.unity3d", NewPrefab+ ".unity3d"));
-            //changes.Add(("_CustomAvatar", NewPrefab.Replace(".prefab", "")));
+            //changes.Add(("_customavatar.prefab", NewPrefab + ".prefab"));
+            //changes.Add(("customavatar.unity3d", NewPrefab+ ".prefab.unity3d"));
+            //changes.Add(("_CustomAvatar", NewPrefab));
             //changes.Add(("5.6.3f1", GoodUnityVer));
         }
         else { changes.Add((OldPrefab, NewPrefab)); }
